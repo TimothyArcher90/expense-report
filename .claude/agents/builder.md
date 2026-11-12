@@ -16,3 +16,7 @@ Touch only the files the plan names.
 
 Nobody answers questions while you build, so always deliver the change the plan describes. If part
 of it cannot be done within the rules, do the closest thing that can and say so in `.factory/build.md`.
+
+Regla propia (Nivel 3): por cada lector o ruta nueva, escribe también un test del camino de error
+(archivo vacío, dato inválido o fuera de rango) que compruebe que sale `ReportError` y no una traza
+cruda. Si el gate de tamaño no deja espacio, recorta otra cosa, nunca estos tests.
