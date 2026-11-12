@@ -1,7 +1,9 @@
+import json
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -11,11 +13,55 @@ from report.expenses import Expense, ReportError, parse_row, read_expenses, summ
 ROW = {"date": "2026-10-03", "description": "Taxi", "amount": "12.50", "currency": "usd"}
 
 
-def write_csv(text: str) -> Path:
-    f = tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8")
+def write_file(text: str, suffix: str = ".csv") -> Path:
+    f = tempfile.NamedTemporaryFile("w", suffix=suffix, delete=False, encoding="utf-8")
     f.write(text)
     f.close()
     return Path(f.name)
+
+
+def write_xlsx(rows: list[list[str]]) -> Path:
+    cell = '<c t="inlineStr"><is><t>{}</t></is></c>'
+    cells = "".join("<row>" + "".join(cell.format(v) for v in r) + "</row>" for r in rows)
+    path = write_file("", ".xlsx")
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("xl/worksheets/sheet1.xml", f"<worksheet><sheetData>{cells}</sheetData></worksheet>")
+    return path
+
+
+HEAD = ["date", "description", "amount", "currency"]
+ROWS = [["2026-10-03", "Taxi", "12.50", "USD"], ["2026-10-05", "Lunch", "9", "EUR"]]
+TAXI = Expense(date(2026, 10, 3), "Taxi", Decimal("12.50"), "USD")
+LUNCH = Expense(date(2026, 10, 5), "Lunch", Decimal("9"), "EUR")
+JSON_TEXT = '[{"date":"2026-10-03","description":"Taxi","amount":12.50,"currency":"USD"},' + json.dumps(dict(zip(HEAD, ROWS[1]))) + "]"
+XML_TEXT = "<r>" + "".join("<e>" + "".join(f"<{k}>{v}</{k}>" for k, v in zip(HEAD, r)) + "</e>" for r in ROWS) + "</r>"
+
+
+class Formats(unittest.TestCase):
+    def test_json(self) -> None:
+        self.assertEqual(read_expenses(write_file(JSON_TEXT, ".JSON")), [TAXI, LUNCH])
+
+    def test_xml(self) -> None:
+        self.assertEqual(read_expenses(write_file(XML_TEXT, ".xml")), [TAXI, LUNCH])
+
+    def test_xlsx(self) -> None:
+        self.assertEqual(read_expenses(write_xlsx([HEAD, *ROWS])), [TAXI, LUNCH])
+
+    def test_unsupported_extension(self) -> None:
+        for suffix in (".txt", ".xls"):
+            with self.assertRaisesRegex(ReportError, "unsupported"):
+                read_expenses(write_file("x", suffix))
+
+    def test_bad_amount_names_the_line(self) -> None:
+        bad = [HEAD, ["2026-10-03", "Taxi", "x", "USD"]]
+        for path in (write_file(json.dumps([dict(zip(*bad))]), ".json"), write_xlsx(bad)):
+            with self.assertRaisesRegex(ReportError, "line 2"):
+                read_expenses(path)
+
+    def test_malformed_files(self) -> None:
+        for text, suffix in (("[{", ".json"), ("<a>", ".xml"), ("not a zip", ".xlsx")):
+            with self.assertRaises(ReportError):
+                read_expenses(write_file(text, suffix))
 
 
 class ParseRow(unittest.TestCase):
@@ -37,11 +83,11 @@ class ParseRow(unittest.TestCase):
 
 class ReadAndSummarise(unittest.TestCase):
     def test_reads_a_file(self) -> None:
-        path = write_csv("date,description,amount,currency\n2026-10-03,Taxi,12.50,USD\n2026-10-05,Lunch,9,EUR\n")
+        path = write_file("date,description,amount,currency\n2026-10-03,Taxi,12.50,USD\n2026-10-05,Lunch,9,EUR\n")
         self.assertEqual([e.currency for e in read_expenses(path)], ["USD", "EUR"])
 
     def test_error_line_counts_the_header(self) -> None:
-        path = write_csv("date,description,amount,currency\n2026-10-03,Taxi,x,USD\n")
+        path = write_file("date,description,amount,currency\n2026-10-03,Taxi,x,USD\n")
         with self.assertRaisesRegex(ReportError, "line 2"):
             read_expenses(path)
 
@@ -59,6 +105,11 @@ class Cli(unittest.TestCase):
 
     def test_prints_the_summary(self) -> None:
         out = self.run_cli("data/sample.csv")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("expenses from", out.stdout)
+
+    def test_reads_json(self) -> None:
+        out = self.run_cli(str(write_file(JSON_TEXT, ".json")))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("expenses from", out.stdout)
 
