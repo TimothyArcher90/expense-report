@@ -16,3 +16,6 @@ Standard library only.
 ## Factory rules
 - Phase state lives in `.factory/` as markdown files. Never put plan or review text in code comments.
 - Only the paths in SCOPE (factory.conf) may change. Do not touch factory.sh, lib/, gates/, .claude/, data/ or this file.
+
+## Estilo (regla de David)
+- Docstrings y comentarios en español, una línea cada uno; los nombres de funciones y variables siguen en inglés.
