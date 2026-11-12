@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from report.expenses import Expense, ReportError, parse_row, read_expenses, summary
+from report.expenses import Expense, ReportError, currency_totals, parse_row, read_expenses, summary
 
 ROW = {"date": "2026-10-03", "description": "Taxi", "amount": "12.50", "currency": "usd"}
 
@@ -53,7 +53,41 @@ class ReadAndSummarise(unittest.TestCase):
         self.assertEqual(summary([]), "No expenses.")
 
 
+def exp(amount: str, cur: str) -> Expense:
+    return parse_row({**ROW, "amount": amount, "currency": cur}, 2)
+
+
+class CurrencyTotals(unittest.TestCase):
+    def test_sums_per_currency_with_two_decimals(self) -> None:
+        self.assertEqual(currency_totals([exp("4.20", "eur"), exp("6.80", "eur")]), ["EUR 11.00"])
+
+    def test_sorted_by_code(self) -> None:
+        lines = currency_totals([exp("1", "usd"), exp("2", "eur"), exp("3", "gbp")])
+        self.assertEqual(lines, ["EUR 2.00", "GBP 3.00", "USD 1.00"])
+
+    def test_no_mixing(self) -> None:
+        self.assertEqual(len(currency_totals([exp("1", "usd"), exp("1", "eur")])), 2)
+
+    def test_decimal_exact(self) -> None:
+        self.assertEqual(currency_totals([exp("0.10", "eur"), exp("0.20", "eur")]), ["EUR 0.30"])
+
+    def test_empty(self) -> None:
+        self.assertEqual(currency_totals([]), [])
+
+
 class Cli(unittest.TestCase):
+    def test_prints_currency_totals_after_summary(self) -> None:
+        path = write_csv(
+            "date,description,amount,currency\n"
+            "2026-10-01,A,4.20,EUR\n2026-10-02,B,6.80,EUR\n"
+            "2026-10-03,C,38.50,EUR\n2026-10-04,D,92.40,EUR\n"
+            "2026-10-05,E,210.00,GBP\n2026-10-06,F,485.00,USD\n"
+        )
+        out = self.run_cli(str(path))
+        lines = out.stdout.splitlines()
+        self.assertIn("expenses from", lines[0])
+        self.assertEqual(lines[1:], ["EUR 141.90", "GBP 210.00", "USD 485.00"])
+
     def run_cli(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run([sys.executable, "-m", "report", *args], capture_output=True, text=True)
 
